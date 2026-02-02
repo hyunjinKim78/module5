@@ -1,0 +1,168 @@
+{
+  "index_patterns": ["xdr-logs-*"],
+  "template": {
+    "settings": {
+      "number_of_shards": 3,
+      "number_of_replicas": 1,
+      "index.lifecycle.name": "xdr-lifecycle-policy",
+      "index.lifecycle.rollover_alias": "xdr-logs",
+      "index.mapping.total_fields.limit": 10000,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "dynamic": "strict",
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        },
+        "event": {
+          "properties": {
+            "id": { "type": "keyword" },
+            "kind": { "type": "keyword" },
+            "category": { "type": "keyword" },
+            "type": { "type": "keyword" },
+            "action": { "type": "keyword" },
+            "outcome": { "type": "keyword" },
+            "severity": { "type": "integer" },
+            "risk_score": { "type": "float" }
+          }
+        },
+        "host": {
+          "properties": {
+            "name": { "type": "keyword" },
+            "hostname": { "type": "keyword" },
+            "ip": { "type": "ip" },
+            "mac": { "type": "keyword" },
+            "os": {
+              "properties": {
+                "name": { "type": "keyword" },
+                "version": { "type": "keyword" },
+                "platform": { "type": "keyword" }
+              }
+            }
+          }
+        },
+        "user": {
+          "properties": {
+            "name": { "type": "keyword" },
+            "domain": { "type": "keyword" },
+            "id": { "type": "keyword" },
+            "email": { "type": "keyword" },
+            "roles": { "type": "keyword" }
+          }
+        },
+        "process": {
+          "properties": {
+            "name": { "type": "keyword" },
+            "pid": { "type": "long" },
+            "executable": { "type": "keyword" },
+            "command_line": { "type": "text" },
+            "args": { "type": "keyword" },
+            "hash": {
+              "properties": {
+                "md5": { "type": "keyword" },
+                "sha1": { "type": "keyword" },
+                "sha256": { "type": "keyword" }
+              }
+            },
+            "parent": {
+              "properties": {
+                "name": { "type": "keyword" },
+                "pid": { "type": "long" },
+                "executable": { "type": "keyword" }
+              }
+            }
+          }
+        },
+        "network": {
+          "properties": {
+            "direction": { "type": "keyword" },
+            "protocol": { "type": "keyword" },
+            "transport": { "type": "keyword" },
+            "bytes": { "type": "long" },
+            "packets": { "type": "long" }
+          }
+        },
+        "source": {
+          "properties": {
+            "ip": { "type": "ip" },
+            "port": { "type": "integer" },
+            "mac": { "type": "keyword" },
+            "domain": { "type": "keyword" },
+            "geo": {
+              "properties": {
+                "country_name": { "type": "keyword" },
+                "city_name": { "type": "keyword" },
+                "location": { "type": "geo_point" }
+              }
+            }
+          }
+        },
+        "destination": {
+          "properties": {
+            "ip": { "type": "ip" },
+            "port": { "type": "integer" },
+            "mac": { "type": "keyword" },
+            "domain": { "type": "keyword" },
+            "geo": {
+              "properties": {
+                "country_name": { "type": "keyword" },
+                "city_name": { "type": "keyword" },
+                "location": { "type": "geo_point" }
+              }
+            }
+          }
+        },
+        "file": {
+          "properties": {
+            "name": { "type": "keyword" },
+            "path": { "type": "keyword" },
+            "extension": { "type": "keyword" },
+            "size": { "type": "long" },
+            "hash": {
+              "properties": {
+                "md5": { "type": "keyword" },
+                "sha1": { "type": "keyword" },
+                "sha256": { "type": "keyword" }
+              }
+            }
+          }
+        },
+        "threat": {
+          "properties": {
+            "indicator": {
+              "properties": {
+                "type": { "type": "keyword" },
+                "ip": { "type": "ip" },
+                "domain": { "type": "keyword" },
+                "file_hash": { "type": "keyword" }
+              }
+            },
+            "tactic": {
+              "properties": {
+                "id": { "type": "keyword" },
+                "name": { "type": "keyword" }
+              }
+            },
+            "technique": {
+              "properties": {
+                "id": { "type": "keyword" },
+                "name": { "type": "keyword" }
+              }
+            }
+          }
+        },
+        "tags": { "type": "keyword" },
+        "labels": { "type": "object" },
+        "message": { "type": "text" }
+      }
+    }
+  },
+  "priority": 200,
+  "composed_of": [],
+  "version": 1,
+  "_meta": {
+    "description": "XDR 플랫폼 로그 인덱스 템플릿",
+    "managed": true
+  }
+}

@@ -1,0 +1,393 @@
+# SOAR Playbook: 내부자 위협 대응
+# 플랫폼: Splunk SOAR / Shuffle / n8n 호환 의사코드
+
+name: Insider Threat Response
+description: 내부자 위협 탐지 시 조사 및 대응 플레이북
+version: 1.0
+author: Security Team
+severity: high
+
+triggers:
+  - source: UEBA
+    condition: |
+      risk_score >= 80 OR
+      anomaly_type IN ("data_exfiltration", "privilege_abuse", "policy_violation")
+  - source: DLP
+    condition: |
+      severity == "high" AND
+      data_classification IN ("confidential", "restricted")
+  - source: HR
+    condition: |
+      employee_status IN ("termination_pending", "pip", "resignation_notice")
+
+inputs:
+  - user: "의심 사용자 계정"
+  - user_email: "사용자 이메일"
+  - employee_id: "직원 ID"
+  - alert_type: "알림 유형"
+  - risk_score: "위험 점수"
+  - alert_id: "알림 ID"
+  - trigger_source: "트리거 소스"
+
+workflow:
+  # Phase 1: 사용자 컨텍스트 수집
+  - step: 1
+    name: "사용자 정보 수집"
+    actions:
+      - action: get_user_details
+        target: AD
+        params:
+          username: "{{ user }}"
+        output: ad_user_info
+
+      - action: get_employee_info
+        target: HR_System
+        params:
+          employee_id: "{{ employee_id }}"
+        output: hr_info
+
+      - action: get_user_devices
+        target: CMDB
+        params:
+          username: "{{ user }}"
+        output: user_devices
+
+      - action: get_user_permissions
+        target: IAM
+        params:
+          username: "{{ user }}"
+        output: user_permissions
+
+  # Phase 2: 위험 평가
+  - step: 2
+    name: "위험 요소 평가"
+    actions:
+      - action: check_hr_flags
+        target: Internal
+        params:
+          hr_info: "{{ hr_info }}"
+          flags:
+            - termination_pending
+            - performance_improvement_plan
+            - resignation_submitted
+            - disciplinary_action
+        output: hr_risk_factors
+
+      - action: get_ueba_timeline
+        target: UEBA
+        params:
+          user: "{{ user }}"
+          time_range: "-30d"
+        output: behavior_timeline
+
+      - action: calculate_composite_risk
+        target: Internal
+        params:
+          risk_score: "{{ risk_score }}"
+          hr_factors: "{{ hr_risk_factors }}"
+          behavior_anomalies: "{{ behavior_timeline.anomalies }}"
+        output: composite_risk
+
+  # Phase 3: 활동 분석
+  - step: 3
+    name: "상세 활동 분석"
+    actions:
+      # 파일 접근 분석
+      - action: get_file_access_logs
+        target: DLP
+        params:
+          user: "{{ user }}"
+          time_range: "-7d"
+          filters:
+            - sensitive_files
+            - bulk_downloads
+            - after_hours_access
+        output: file_access_logs
+
+      # 이메일 활동 분석
+      - action: get_email_activity
+        target: Email_Gateway
+        params:
+          user: "{{ user_email }}"
+          time_range: "-7d"
+          filters:
+            - external_recipients
+            - large_attachments
+            - personal_email_forwards
+        output: email_activity
+
+      # 클라우드 활동 분석
+      - action: get_cloud_activity
+        target: CASB
+        params:
+          user: "{{ user }}"
+          time_range: "-7d"
+          filters:
+            - file_uploads
+            - sharing_changes
+            - unauthorized_apps
+        output: cloud_activity
+
+      # USB/외부 장치 사용
+      - action: get_removable_media_logs
+        target: EDR
+        params:
+          user: "{{ user }}"
+          time_range: "-30d"
+        output: removable_media_logs
+
+      # 프린트 활동
+      - action: get_print_logs
+        target: PrintServer
+        params:
+          user: "{{ user }}"
+          time_range: "-7d"
+        output: print_logs
+
+  # Phase 4: 데이터 유출 분석
+  - step: 4
+    name: "데이터 유출 분석"
+    actions:
+      - action: analyze_data_movement
+        target: Internal
+        params:
+          file_access: "{{ file_access_logs }}"
+          email_activity: "{{ email_activity }}"
+          cloud_activity: "{{ cloud_activity }}"
+          removable_media: "{{ removable_media_logs }}"
+          print_logs: "{{ print_logs }}"
+        output: data_movement_analysis
+
+      - action: identify_sensitive_data
+        target: DLP
+        params:
+          activities: "{{ data_movement_analysis }}"
+        output: sensitive_data_exposure
+
+      - action: calculate_data_volume
+        target: Internal
+        params:
+          activities: "{{ data_movement_analysis }}"
+        output: data_volume_stats
+
+  # Phase 5: 위협 판정
+  - step: 5
+    name: "위협 수준 판정"
+    actions:
+      - action: determine_threat_level
+        target: Internal
+        params:
+          composite_risk: "{{ composite_risk }}"
+          data_exposure: "{{ sensitive_data_exposure }}"
+          data_volume: "{{ data_volume_stats }}"
+        output: threat_assessment
+        # 판정 기준:
+        # CRITICAL: 기밀 데이터 대량 유출 + HR 위험 요소
+        # HIGH: 기밀 데이터 접근 + 이상 행동
+        # MEDIUM: 정책 위반 + 이상 행동
+        # LOW: 단순 정책 위반
+
+  # Phase 6a: 긴급 대응 (Critical/High)
+  - step: 6a
+    name: "긴급 대응 조치"
+    condition: threat_assessment.level IN ("CRITICAL", "HIGH")
+    actions:
+      # 네트워크 접근 제한 (완전 차단 아님 - 조사 목적)
+      - action: restrict_network_access
+        target: NAC
+        params:
+          user: "{{ user }}"
+          restriction_level: "limited"
+          allow_list:
+            - "corporate_apps"
+        output: network_restriction
+
+      # 클라우드 세션 종료
+      - action: revoke_cloud_sessions
+        target: CASB
+        params:
+          user: "{{ user }}"
+        output: cloud_session_revoke
+
+      # 외부 전송 차단
+      - action: block_external_transfers
+        target: DLP
+        params:
+          user: "{{ user }}"
+          channels:
+            - email_external
+            - cloud_upload
+            - removable_media
+        output: transfer_block
+
+      # 고급 모니터링 활성화
+      - action: enable_enhanced_monitoring
+        target: UEBA
+        params:
+          user: "{{ user }}"
+          monitoring_level: "full"
+          capture_screenshots: false  # 법적 검토 필요
+        output: enhanced_monitoring
+
+  # Phase 6b: 표준 대응 (Medium/Low)
+  - step: 6b
+    name: "표준 모니터링"
+    condition: threat_assessment.level IN ("MEDIUM", "LOW")
+    actions:
+      - action: add_to_watchlist
+        target: UEBA
+        params:
+          user: "{{ user }}"
+          watchlist: "insider_threat_monitoring"
+          duration: "30d"
+        output: watchlist_add
+
+      - action: enable_dlp_alerts
+        target: DLP
+        params:
+          user: "{{ user }}"
+          alert_threshold: "low"
+        output: dlp_alerts
+
+  # Phase 7: 이해관계자 알림
+  - step: 7
+    name: "이해관계자 알림"
+    actions:
+      - action: notify_hr
+        target: Email
+        params:
+          to: "hr-security@company.com"
+          subject: "[기밀] 내부자 위협 조사 개시 - {{ user }}"
+          template: "insider_threat_hr_notification"
+          variables:
+            user: "{{ user }}"
+            threat_level: "{{ threat_assessment.level }}"
+            summary: "{{ data_movement_analysis.summary }}"
+        condition: threat_assessment.level IN ("CRITICAL", "HIGH")
+
+      - action: notify_legal
+        target: Email
+        params:
+          to: "legal@company.com"
+          subject: "[기밀] 내부자 위협 법적 검토 요청 - {{ user }}"
+          template: "insider_threat_legal_notification"
+        condition: threat_assessment.level == "CRITICAL"
+
+      - action: notify_manager
+        target: Email
+        params:
+          to: "{{ hr_info.manager_email }}"
+          subject: "[기밀] 팀원 보안 이슈 알림"
+          template: "insider_threat_manager_notification"
+        condition: |
+          threat_assessment.level IN ("CRITICAL", "HIGH") AND
+          hr_info.manager_clearance == true
+
+      - action: send_notification
+        target: Slack
+        params:
+          channel: "#insider-threat-private"
+          message: |
+            :warning: *내부자 위협 케이스*
+
+            *사용자:* [REDACTED - 케이스 참조]
+            *위협 수준:* {{ threat_assessment.level }}
+            *트리거:* {{ trigger_source }}
+
+            *주요 지표:*
+            - 민감 데이터 접근: {{ sensitive_data_exposure.count }}건
+            - 이상 행동 점수: {{ composite_risk.score }}
+            - HR 위험 요소: {{ hr_risk_factors.present }}
+
+            케이스 ID: {{ case_id }}
+            _상세 내용은 케이스 관리 시스템 참조_
+
+  # Phase 8: 증거 보존
+  - step: 8
+    name: "증거 보존"
+    condition: threat_assessment.level IN ("CRITICAL", "HIGH")
+    actions:
+      - action: preserve_mailbox
+        target: Email_Gateway
+        params:
+          user: "{{ user_email }}"
+          legal_hold: true
+        output: mailbox_preservation
+
+      - action: preserve_cloud_data
+        target: CASB
+        params:
+          user: "{{ user }}"
+          legal_hold: true
+        output: cloud_preservation
+
+      - action: preserve_endpoint_data
+        target: EDR
+        params:
+          devices: "{{ user_devices }}"
+          preserve_logs: true
+        output: endpoint_preservation
+
+      - action: export_activity_logs
+        target: SIEM
+        params:
+          user: "{{ user }}"
+          time_range: "-90d"
+          format: "forensic"
+        output: activity_export
+
+  # Phase 9: 케이스 생성
+  - step: 9
+    name: "조사 케이스 생성"
+    actions:
+      - action: create_case
+        target: TheHive
+        params:
+          title: "내부자 위협 조사 - [REDACTED]"
+          severity: "{{ threat_assessment.severity_level }}"
+          tlp: 3  # TLP:AMBER
+          pap: 3  # PAP:RED
+          tags:
+            - "insider-threat"
+            - "{{ threat_assessment.level }}"
+            - "confidential"
+          custom_fields:
+            employee_id: "{{ employee_id }}"
+            department: "{{ hr_info.department }}"
+            threat_level: "{{ threat_assessment.level }}"
+          tasks:
+            - title: "HR 조율"
+              assignee: "hr_liaison"
+            - title: "법무 검토"
+              assignee: "legal_liaison"
+              condition: "{{ threat_assessment.level == 'CRITICAL' }}"
+            - title: "포렌식 분석"
+              assignee: "forensics_team"
+            - title: "경영진 브리핑"
+              assignee: "soc_manager"
+            - title: "최종 보고서"
+              assignee: "case_owner"
+        output: case_id
+
+outputs:
+  - threat_level: "{{ threat_assessment.level }}"
+  - case_id: "{{ case_id }}"
+  - data_exposure_summary: "{{ sensitive_data_exposure.summary }}"
+  - actions_taken: "{{ workflow.actions_log }}"
+
+compliance:
+  - standard: "GDPR"
+    requirements:
+      - "직원 통지 전 법무 검토"
+      - "데이터 최소화 원칙 준수"
+  - standard: "내부 정책"
+    requirements:
+      - "HR 조율 필수"
+      - "증거 보존 체인 유지"
+
+notes: |
+  ## 주의사항
+  - 이 플레이북은 법적 검토가 필요한 민감한 조사를 다룹니다
+  - 모든 조치는 HR 및 법무팀과 조율하여 수행해야 합니다
+  - 직원 프라이버시 관련 법규를 준수해야 합니다
+  - 증거 보존 체인(Chain of Custody)을 유지해야 합니다

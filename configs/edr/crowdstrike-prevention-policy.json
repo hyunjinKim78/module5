@@ -1,0 +1,108 @@
+{
+  "policy_name": "XDR-Standard-Prevention",
+  "description": "XDR 플랫폼 표준 CrowdStrike 예방 정책",
+  "platform": "Windows",
+  "settings": {
+    "prevention": {
+      "cloud_anti_malware": {
+        "detection": "AGGRESSIVE",
+        "prevention": "MODERATE"
+      },
+      "sensor_anti_malware": {
+        "detection": "AGGRESSIVE",
+        "prevention": "MODERATE"
+      },
+      "quarantine": {
+        "enabled": true,
+        "auto_delete_days": 30
+      },
+      "on_write_script_file_visibility": {
+        "enabled": true
+      },
+      "memory_scanning": {
+        "enabled": true,
+        "prevention": true
+      },
+      "script_based_execution_monitoring": {
+        "enabled": true,
+        "prevention": true
+      },
+      "suspicious_processes": {
+        "enabled": true,
+        "prevention": true
+      },
+      "intelligence_sourced_threats": {
+        "enabled": true,
+        "prevention": true
+      },
+      "sensor_tampering_protection": {
+        "enabled": true
+      }
+    },
+    "behavior_prevention": {
+      "execution_blocking": {
+        "suspicious_scripts": true,
+        "suspicious_kernel_drivers": true,
+        "credential_dumping": true,
+        "suspicious_registry_operations": true,
+        "process_hollowing": true,
+        "code_injection": true,
+        "chopper_webshell": true,
+        "java_script_via_rundll32": true,
+        "driver_load_prevention": true,
+        "suspicious_dll_search_order_hijacking": true,
+        "bitsadmin_download": true,
+        "certutil_download": true
+      },
+      "lateral_movement": {
+        "enabled": true,
+        "prevent_remote_execution": true
+      },
+      "ransomware": {
+        "enabled": true,
+        "prevention": true,
+        "backup_deletion_prevention": true
+      }
+    },
+    "response": {
+      "real_time_response": {
+        "enabled": true,
+        "admin_only": true
+      },
+      "network_containment": {
+        "enabled": true,
+        "allow_exception_ips": [
+          "10.0.0.0/8"
+        ]
+      }
+    },
+    "visibility": {
+      "process_events": true,
+      "network_events": true,
+      "file_events": true,
+      "registry_events": true,
+      "dns_events": true,
+      "authentication_events": true,
+      "enhanced_visibility": true,
+      "usb_visibility": true,
+      "firmware_visibility": true
+    }
+  },
+  "exclusions": {
+    "file_paths": [
+      "C:\\Windows\\Temp\\Updates\\*",
+      "C:\\ProgramData\\Microsoft\\Windows Defender\\*"
+    ],
+    "processes": [
+      "C:\\Windows\\System32\\svchost.exe",
+      "C:\\Windows\\System32\\wuauclt.exe"
+    ],
+    "file_hashes": []
+  },
+  "assignment": {
+    "host_groups": [
+      "Production-Servers",
+      "Workstations"
+    ]
+  }
+}

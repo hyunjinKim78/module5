@@ -1,0 +1,303 @@
+# SOAR Playbook: 랜섬웨어 대응
+# 플랫폼: Splunk SOAR / Shuffle / n8n 호환 의사코드
+
+name: Ransomware Incident Response
+description: 랜섬웨어 감염 탐지 시 긴급 대응 플레이북
+version: 1.0
+author: Security Team
+severity: critical
+
+triggers:
+  - source: EDR
+    condition: detection.category == "ransomware"
+  - source: SIEM
+    condition: |
+      alert.type == "file_encryption" OR
+      alert.type == "shadow_copy_deletion" OR
+      alert.type == "ransom_note_detected"
+
+inputs:
+  - host_name: "감염된 호스트명"
+  - host_ip: "호스트 IP 주소"
+  - affected_files: "암호화된 파일 목록"
+  - user: "관련 사용자"
+  - alert_id: "알림 ID"
+  - detection_time: "탐지 시간"
+
+workflow:
+  # Phase 1: 즉시 격리 (자동)
+  - step: 1
+    name: "긴급 네트워크 격리"
+    actions:
+      - action: isolate_host
+        target: EDR
+        params:
+          hostname: "{{ host_name }}"
+          isolation_type: "full"
+        output: isolation_result
+        timeout: 30s
+
+      - action: block_ip
+        target: Firewall
+        params:
+          ip: "{{ host_ip }}"
+          rule_name: "RANSOMWARE_QUARANTINE_{{ host_name }}"
+          duration: "indefinite"
+        output: firewall_result
+
+      - action: disable_user
+        target: AD
+        params:
+          username: "{{ user }}"
+          reason: "랜섬웨어 감염 의심"
+        output: user_disable_result
+
+  # Phase 2: 확산 방지
+  - step: 2
+    name: "네트워크 세그먼트 격리"
+    actions:
+      - action: get_network_segment
+        target: CMDB
+        params:
+          ip: "{{ host_ip }}"
+        output: network_segment
+
+      - action: block_segment_traffic
+        target: Firewall
+        params:
+          segment: "{{ network_segment.vlan }}"
+          allow_list:
+            - "SOC_NETWORK"
+            - "BACKUP_NETWORK"
+        output: segment_isolation
+        condition: network_segment.criticality == "high"
+
+      - action: get_connected_hosts
+        target: NDR
+        params:
+          host_ip: "{{ host_ip }}"
+          time_range: "1h"
+        output: connected_hosts
+
+  # Phase 3: 영향 범위 파악
+  - step: 3
+    name: "영향 범위 분석"
+    actions:
+      - action: scan_for_iocs
+        target: EDR
+        params:
+          hosts: "{{ connected_hosts }}"
+          iocs:
+            - type: "file_extension"
+              value: ".encrypted,.locked,.crypto"
+            - type: "file_name"
+              value: "README_DECRYPT.*,HOW_TO_RECOVER.*"
+            - type: "process"
+              value: "vssadmin.exe,wmic.exe,bcdedit.exe"
+        output: affected_scope
+
+      - action: check_shared_drives
+        target: FileServer
+        params:
+          user: "{{ user }}"
+        output: shared_drive_status
+
+  # Phase 4: 증거 수집
+  - step: 4
+    name: "포렌식 데이터 수집"
+    actions:
+      - action: capture_memory
+        target: EDR
+        params:
+          hostname: "{{ host_name }}"
+          priority: "high"
+        output: memory_dump
+
+      - action: collect_artifacts
+        target: EDR
+        params:
+          hostname: "{{ host_name }}"
+          artifacts:
+            - running_processes
+            - network_connections
+            - registry_run_keys
+            - scheduled_tasks
+            - recent_files
+            - prefetch
+            - amcache
+        output: forensic_artifacts
+
+      - action: collect_ransom_note
+        target: EDR
+        params:
+          hostname: "{{ host_name }}"
+          patterns:
+            - "*README*.txt"
+            - "*DECRYPT*.txt"
+            - "*RECOVER*.html"
+        output: ransom_note
+
+  # Phase 5: 랜섬웨어 식별
+  - step: 5
+    name: "랜섬웨어 변종 식별"
+    actions:
+      - action: analyze_ransom_note
+        target: ThreatIntel
+        params:
+          content: "{{ ransom_note.content }}"
+        output: ransomware_family
+
+      - action: lookup_decryptor
+        target: NoMoreRansom
+        params:
+          family: "{{ ransomware_family.name }}"
+        output: decryptor_available
+
+      - action: get_iocs
+        target: MISP
+        params:
+          family: "{{ ransomware_family.name }}"
+        output: ransomware_iocs
+
+  # Phase 6: 추가 호스트 스캔
+  - step: 6
+    name: "전사 IOC 스캔"
+    actions:
+      - action: push_iocs
+        target: EDR
+        params:
+          iocs: "{{ ransomware_iocs }}"
+          action: "detect_and_alert"
+        output: ioc_push_result
+
+      - action: hunt_query
+        target: SIEM
+        params:
+          query: |
+            index=edr
+            (process_name IN ("vssadmin.exe", "wmic.exe", "bcdedit.exe")
+             OR file_extension IN (".encrypted", ".locked"))
+            | stats count by host, user
+          time_range: "-24h"
+        output: hunt_results
+
+  # Phase 7: 알림 및 에스컬레이션
+  - step: 7
+    name: "긴급 알림"
+    actions:
+      - action: send_notification
+        target: PagerDuty
+        params:
+          severity: "critical"
+          title: "🚨 랜섬웨어 감염 - 긴급 대응 필요"
+          description: |
+            호스트: {{ host_name }}
+            사용자: {{ user }}
+            랜섬웨어: {{ ransomware_family.name }}
+            탐지 시간: {{ detection_time }}
+            격리 상태: {{ isolation_result.status }}
+          escalation_policy: "security_critical"
+
+      - action: send_notification
+        target: Email
+        params:
+          to:
+            - "ciso@company.com"
+            - "it-director@company.com"
+            - "soc@company.com"
+          subject: "[긴급-랜섬웨어] 보안 인시던트 발생 - {{ host_name }}"
+          template: "ransomware_executive_notification"
+          attachments:
+            - "{{ forensic_artifacts.summary }}"
+
+      - action: send_notification
+        target: Slack
+        params:
+          channel: "#security-incidents"
+          message: |
+            :rotating_light: *랜섬웨어 인시던트*
+
+            *호스트:* {{ host_name }}
+            *사용자:* {{ user }}
+            *랜섬웨어 패밀리:* {{ ransomware_family.name }}
+            *영향 호스트 수:* {{ affected_scope.count }}
+            *복호화 도구:* {{ decryptor_available.status }}
+
+            *대응 상태:*
+            - 호스트 격리: ✅
+            - 사용자 비활성화: ✅
+            - 포렌식 수집: ✅
+
+            케이스: #{{ alert_id }}
+
+  # Phase 8: 케이스 관리
+  - step: 8
+    name: "인시던트 케이스 생성"
+    actions:
+      - action: create_case
+        target: TheHive
+        params:
+          title: "랜섬웨어 감염 - {{ ransomware_family.name }} - {{ host_name }}"
+          severity: 4
+          tlp: 3
+          pap: 2
+          tags:
+            - "ransomware"
+            - "{{ ransomware_family.name }}"
+            - "critical"
+          tasks:
+            - title: "영향 범위 확인"
+              status: "completed"
+            - title: "포렌식 분석"
+              status: "in_progress"
+            - title: "복구 계획 수립"
+              status: "waiting"
+            - title: "근본 원인 분석"
+              status: "waiting"
+            - title: "경영진 보고"
+              status: "waiting"
+          observables:
+            - type: "hostname"
+              value: "{{ host_name }}"
+            - type: "ip"
+              value: "{{ host_ip }}"
+            - type: "user"
+              value: "{{ user }}"
+        output: case_id
+
+outputs:
+  - isolation_status: "{{ isolation_result.status }}"
+  - case_id: "{{ case_id }}"
+  - ransomware_family: "{{ ransomware_family.name }}"
+  - affected_hosts: "{{ affected_scope.hosts }}"
+  - decryptor_available: "{{ decryptor_available.status }}"
+
+recovery:
+  # 백업에서 복구
+  - step: 1
+    name: "백업 상태 확인"
+    condition: manual_trigger
+    actions:
+      - action: check_backup_status
+        target: BackupSystem
+        params:
+          hostname: "{{ host_name }}"
+          check_integrity: true
+        output: backup_status
+
+  # 시스템 복구
+  - step: 2
+    name: "시스템 재구성"
+    condition: backup_status.valid == true
+    actions:
+      - action: wipe_and_reimage
+        target: SCCM
+        params:
+          hostname: "{{ host_name }}"
+          image: "standard_windows_image"
+
+      - action: restore_data
+        target: BackupSystem
+        params:
+          hostname: "{{ host_name }}"
+          restore_point: "{{ backup_status.last_clean_backup }}"

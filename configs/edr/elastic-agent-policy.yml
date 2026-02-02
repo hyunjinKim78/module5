@@ -1,0 +1,138 @@
+# Elastic Agent Policy for XDR Endpoint
+# Elastic Defend 통합 정책
+
+name: "XDR Endpoint Policy"
+namespace: "xdr"
+description: "XDR 플랫폼 엔드포인트 에이전트 정책"
+
+monitoring:
+  enabled: true
+  logs: true
+  metrics: true
+
+inputs:
+  # Elastic Defend (EDR) 통합
+  - id: endpoint-security
+    name: Endpoint Security
+    type: endpoint
+    enabled: true
+    data_stream:
+      namespace: xdr
+    policy:
+      windows:
+        events:
+          process: true
+          network: true
+          file: true
+          registry: true
+          dll: true
+          security: true
+        malware:
+          mode: prevent
+          quarantine: true
+        ransomware:
+          mode: prevent
+          supported: true
+        memory_protection:
+          mode: prevent
+          shellcode: prevent
+          shellcode_thread: prevent
+          shellcode_trampoline: prevent
+        behavior_protection:
+          mode: prevent
+          supported: true
+        attack_surface_reduction:
+          credential_hardening:
+            enabled: true
+      mac:
+        events:
+          process: true
+          network: true
+          file: true
+        malware:
+          mode: prevent
+          quarantine: true
+        behavior_protection:
+          mode: prevent
+      linux:
+        events:
+          process: true
+          network: true
+          file: true
+        malware:
+          mode: prevent
+          quarantine: true
+        behavior_protection:
+          mode: prevent
+
+  # System Integration - 시스템 로그 수집
+  - id: system-logs
+    name: System Logs
+    type: system/metrics
+    enabled: true
+    data_stream:
+      namespace: xdr
+    streams:
+      - data_stream:
+          dataset: system.cpu
+          type: metrics
+        metricsets: [cpu]
+        period: 30s
+      - data_stream:
+          dataset: system.memory
+          type: metrics
+        metricsets: [memory]
+        period: 30s
+      - data_stream:
+          dataset: system.network
+          type: metrics
+        metricsets: [network]
+        period: 30s
+      - data_stream:
+          dataset: system.process
+          type: metrics
+        metricsets: [process]
+        period: 30s
+        processes: [".*"]
+        process.include_top_n:
+          by_cpu: 10
+          by_memory: 10
+
+  # Windows Event Logs
+  - id: winlog
+    name: Windows Event Logs
+    type: winlog
+    enabled: true
+    data_stream:
+      namespace: xdr
+    streams:
+      - data_stream:
+          dataset: windows.security
+          type: logs
+        channel: Security
+        event_id: "4624,4625,4648,4672,4688,4689,4697,4698,4699,4700,4701,4702,4720,4722,4723,4724,4725,4726,4738,4740,4767,4768,4769,4771,4776,5140,5145"
+      - data_stream:
+          dataset: windows.system
+          type: logs
+        channel: System
+        event_id: "7045,7040"
+      - data_stream:
+          dataset: windows.powershell
+          type: logs
+        channel: Microsoft-Windows-PowerShell/Operational
+        event_id: "4103,4104,4105,4106"
+      - data_stream:
+          dataset: windows.sysmon
+          type: logs
+        channel: Microsoft-Windows-Sysmon/Operational
+
+# 에이전트 설정
+agent:
+  monitoring:
+    enabled: true
+    logs: true
+    metrics: true
+  protection:
+    enabled: true
+    uninstall_token_hash: ""
+    signing_key: ""

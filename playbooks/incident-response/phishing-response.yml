@@ -1,0 +1,337 @@
+# SOAR Playbook: 피싱 대응
+# 플랫폼: Splunk SOAR / Shuffle / n8n 호환 의사코드
+
+name: Phishing Incident Response
+description: 피싱 이메일 신고 및 탐지 시 자동 대응 플레이북
+version: 1.0
+author: Security Team
+severity: medium
+
+triggers:
+  - source: Email_Gateway
+    condition: verdict == "phishing" OR verdict == "suspicious"
+  - source: User_Report
+    condition: report_type == "phishing"
+  - source: SIEM
+    condition: alert.category == "phishing"
+
+inputs:
+  - email_id: "이메일 메시지 ID"
+  - sender: "발신자 주소"
+  - subject: "이메일 제목"
+  - recipients: "수신자 목록"
+  - attachments: "첨부파일 정보"
+  - urls: "본문 내 URL 목록"
+  - reporter: "신고자 (선택)"
+
+workflow:
+  # Phase 1: 이메일 분석
+  - step: 1
+    name: "이메일 헤더 분석"
+    actions:
+      - action: get_email_headers
+        target: Email_Gateway
+        params:
+          message_id: "{{ email_id }}"
+        output: email_headers
+
+      - action: analyze_headers
+        target: Internal
+        params:
+          headers: "{{ email_headers }}"
+          checks:
+            - spf_validation
+            - dkim_validation
+            - dmarc_validation
+            - header_anomalies
+            - reply_to_mismatch
+        output: header_analysis
+
+      - action: extract_sender_info
+        target: Internal
+        params:
+          sender: "{{ sender }}"
+        output: sender_info
+
+  # Phase 2: 발신자 평판 조회
+  - step: 2
+    name: "발신자 평판 분석"
+    actions:
+      - action: check_domain_reputation
+        target: VirusTotal
+        params:
+          domain: "{{ sender_info.domain }}"
+        output: vt_domain_result
+
+      - action: check_domain_age
+        target: WHOIS
+        params:
+          domain: "{{ sender_info.domain }}"
+        output: domain_whois
+
+      - action: check_email_reputation
+        target: EmailRep
+        params:
+          email: "{{ sender }}"
+        output: email_reputation
+
+      - action: lookup_sender
+        target: MISP
+        params:
+          value: "{{ sender }}"
+          type: "email-src"
+        output: misp_sender
+
+  # Phase 3: URL 분석
+  - step: 3
+    name: "URL 분석"
+    condition: urls | length > 0
+    actions:
+      - action: scan_urls
+        target: VirusTotal
+        params:
+          urls: "{{ urls }}"
+        output: vt_url_results
+
+      - action: scan_urls
+        target: URLScan
+        params:
+          urls: "{{ urls }}"
+          visibility: "private"
+        output: urlscan_results
+
+      - action: check_urls
+        target: PhishTank
+        params:
+          urls: "{{ urls }}"
+        output: phishtank_results
+
+      - action: expand_shortened_urls
+        target: Internal
+        params:
+          urls: "{{ urls }}"
+        output: expanded_urls
+
+  # Phase 4: 첨부파일 분석
+  - step: 4
+    name: "첨부파일 분석"
+    condition: attachments | length > 0
+    actions:
+      - action: extract_attachments
+        target: Email_Gateway
+        params:
+          message_id: "{{ email_id }}"
+        output: extracted_files
+
+      - action: scan_files
+        target: VirusTotal
+        params:
+          files: "{{ extracted_files }}"
+        output: vt_file_results
+
+      - action: detonate_files
+        target: Sandbox
+        params:
+          files: "{{ extracted_files }}"
+          timeout: 300
+          environment: "windows_10"
+        output: sandbox_results
+
+      - action: check_file_hashes
+        target: MISP
+        params:
+          hashes: "{{ extracted_files.hashes }}"
+        output: misp_file_results
+
+  # Phase 5: 위협 판정
+  - step: 5
+    name: "위협 판정"
+    actions:
+      - action: calculate_risk_score
+        target: Internal
+        params:
+          inputs:
+            header_analysis: "{{ header_analysis }}"
+            vt_domain: "{{ vt_domain_result }}"
+            domain_age: "{{ domain_whois.age_days }}"
+            vt_urls: "{{ vt_url_results }}"
+            vt_files: "{{ vt_file_results }}"
+            sandbox: "{{ sandbox_results }}"
+          weights:
+            spf_fail: 20
+            dkim_fail: 20
+            new_domain: 30
+            malicious_url: 50
+            malicious_file: 80
+        output: risk_assessment
+
+  # Phase 6: 대응 조치
+  - step: 6
+    name: "이메일 격리 및 차단"
+    condition: risk_assessment.score >= 50
+    actions:
+      # 해당 이메일 삭제
+      - action: quarantine_email
+        target: Email_Gateway
+        params:
+          message_id: "{{ email_id }}"
+        output: quarantine_result
+
+      # 동일 발신자 이메일 검색 및 삭제
+      - action: search_and_remove
+        target: Email_Gateway
+        params:
+          query: "from:{{ sender }} received:today"
+          action: "quarantine"
+        output: bulk_quarantine_result
+
+      # 발신자 차단
+      - action: block_sender
+        target: Email_Gateway
+        params:
+          sender: "{{ sender }}"
+          block_type: "domain"
+        output: sender_block_result
+
+      # 악성 URL 차단
+      - action: block_urls
+        target: Proxy
+        params:
+          urls: "{{ urls }}"
+          category: "phishing"
+        output: url_block_result
+        condition: vt_url_results.malicious_count > 0
+
+  # Phase 7: 사용자 확인
+  - step: 7
+    name: "클릭 여부 확인"
+    actions:
+      - action: check_url_clicks
+        target: Proxy
+        params:
+          urls: "{{ urls }}"
+          time_range: "-24h"
+        output: click_logs
+
+      - action: check_attachment_opens
+        target: EDR
+        params:
+          hashes: "{{ extracted_files.hashes }}"
+          time_range: "-24h"
+        output: open_logs
+
+      - action: identify_affected_users
+        target: Internal
+        params:
+          recipients: "{{ recipients }}"
+          click_logs: "{{ click_logs }}"
+          open_logs: "{{ open_logs }}"
+        output: affected_users
+
+  # Phase 8: 자격 증명 손상 확인
+  - step: 8
+    name: "자격 증명 확인"
+    condition: affected_users | length > 0
+    actions:
+      - action: check_credential_submission
+        target: Proxy
+        params:
+          users: "{{ affected_users }}"
+          urls: "{{ urls }}"
+        output: credential_submission
+
+      - action: force_password_reset
+        target: AD
+        params:
+          users: "{{ credential_submission.users }}"
+          notify: true
+        output: password_reset
+        condition: credential_submission.detected == true
+
+      - action: revoke_sessions
+        target: AD
+        params:
+          users: "{{ credential_submission.users }}"
+        output: session_revoke
+        condition: credential_submission.detected == true
+
+  # Phase 9: 알림
+  - step: 9
+    name: "관계자 알림"
+    actions:
+      # 신고자 감사 알림
+      - action: send_notification
+        target: Email
+        params:
+          to: "{{ reporter }}"
+          subject: "피싱 신고 감사 - 조치 완료"
+          template: "phishing_thank_you"
+        condition: reporter != null
+
+      # 영향받은 사용자 알림
+      - action: send_notification
+        target: Email
+        params:
+          to: "{{ affected_users }}"
+          subject: "[보안] 피싱 이메일 관련 안내"
+          template: "phishing_user_notification"
+          variables:
+            action_required: "{{ credential_submission.detected }}"
+
+      # SOC 알림
+      - action: send_notification
+        target: Slack
+        params:
+          channel: "#security-alerts"
+          message: |
+            :fishing_pole_and_fish: *피싱 인시던트 처리 완료*
+
+            *발신자:* {{ sender }}
+            *제목:* {{ subject }}
+            *위험 점수:* {{ risk_assessment.score }}/100
+
+            *조치 내역:*
+            - 이메일 격리: {{ bulk_quarantine_result.count }}건
+            - URL 클릭 사용자: {{ click_logs.users | length }}명
+            - 자격증명 손상: {{ credential_submission.detected }}
+
+            케이스: #{{ case_id }}
+
+  # Phase 10: IOC 등록
+  - step: 10
+    name: "IOC 등록"
+    condition: risk_assessment.verdict == "malicious"
+    actions:
+      - action: add_iocs
+        target: MISP
+        params:
+          event_info: "Phishing Campaign - {{ sender_info.domain }}"
+          iocs:
+            - type: "email-src"
+              value: "{{ sender }}"
+              comment: "피싱 발신자"
+            - type: "domain"
+              value: "{{ sender_info.domain }}"
+              comment: "피싱 도메인"
+            - type: "url"
+              values: "{{ urls }}"
+              comment: "피싱 URL"
+          tags:
+            - "phishing"
+            - "tlp:amber"
+        output: misp_event
+
+outputs:
+  - risk_score: "{{ risk_assessment.score }}"
+  - verdict: "{{ risk_assessment.verdict }}"
+  - emails_quarantined: "{{ bulk_quarantine_result.count }}"
+  - affected_users: "{{ affected_users }}"
+  - credentials_compromised: "{{ credential_submission.detected }}"
+
+metrics:
+  - name: "phishing_response_time"
+    value: "{{ workflow.duration }}"
+  - name: "emails_blocked"
+    value: "{{ bulk_quarantine_result.count }}"
+  - name: "users_affected"
+    value: "{{ affected_users | length }}"

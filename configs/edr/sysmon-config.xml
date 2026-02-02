@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  XDR Platform Sysmon Configuration
+  기반: SwiftOnSecurity sysmonconfig
+  최적화: XDR 탐지 요구사항에 맞춰 조정
+-->
+<Sysmon schemaversion="4.90">
+  <!-- 드라이버 로드 시 해시 알고리즘 -->
+  <HashAlgorithms>SHA256,IMPHASH</HashAlgorithms>
+
+  <!-- DNS 쿼리 로깅 활성화 -->
+  <DnsLookup>True</DnsLookup>
+
+  <!-- 클립보드 변경 모니터링 비활성화 (성능) -->
+  <CheckRevocation>False</CheckRevocation>
+
+  <EventFiltering>
+    <!-- Event ID 1: 프로세스 생성 -->
+    <RuleGroup name="ProcessCreate" groupRelation="or">
+      <ProcessCreate onmatch="exclude">
+        <!-- 신뢰할 수 있는 시스템 프로세스 제외 -->
+        <Image condition="is">C:\Windows\System32\wbem\WmiPrvSE.exe</Image>
+        <Image condition="is">C:\Windows\System32\SearchIndexer.exe</Image>
+        <Image condition="is">C:\Windows\System32\backgroundTaskHost.exe</Image>
+        <ParentImage condition="is">C:\Windows\System32\services.exe</ParentImage>
+      </ProcessCreate>
+    </RuleGroup>
+
+    <!-- Event ID 3: 네트워크 연결 -->
+    <RuleGroup name="NetworkConnect" groupRelation="or">
+      <NetworkConnect onmatch="include">
+        <!-- 의심스러운 포트 연결 -->
+        <DestinationPort condition="is">4444</DestinationPort>
+        <DestinationPort condition="is">5555</DestinationPort>
+        <DestinationPort condition="is">6666</DestinationPort>
+        <DestinationPort condition="is">1337</DestinationPort>
+        <!-- 비정상적인 프로세스의 네트워크 연결 -->
+        <Image condition="end with">powershell.exe</Image>
+        <Image condition="end with">cmd.exe</Image>
+        <Image condition="end with">wscript.exe</Image>
+        <Image condition="end with">cscript.exe</Image>
+        <Image condition="end with">mshta.exe</Image>
+        <Image condition="end with">regsvr32.exe</Image>
+        <Image condition="end with">rundll32.exe</Image>
+        <Image condition="end with">certutil.exe</Image>
+      </NetworkConnect>
+    </RuleGroup>
+
+    <!-- Event ID 7: 이미지 로드 (DLL) -->
+    <RuleGroup name="ImageLoad" groupRelation="or">
+      <ImageLoad onmatch="include">
+        <!-- 의심스러운 DLL 로드 위치 -->
+        <ImageLoaded condition="begin with">C:\Users\</ImageLoaded>
+        <ImageLoaded condition="begin with">C:\ProgramData\</ImageLoaded>
+        <ImageLoaded condition="begin with">C:\Windows\Temp\</ImageLoaded>
+        <!-- CLR 로드 (PowerShell AMSI 우회 탐지) -->
+        <ImageLoaded condition="end with">clr.dll</ImageLoaded>
+        <ImageLoaded condition="end with">clrjit.dll</ImageLoaded>
+      </ImageLoad>
+    </RuleGroup>
+
+    <!-- Event ID 8: CreateRemoteThread -->
+    <RuleGroup name="CreateRemoteThread" groupRelation="or">
+      <CreateRemoteThread onmatch="include">
+        <!-- 프로세스 인젝션 탐지 -->
+        <TargetImage condition="end with">lsass.exe</TargetImage>
+        <SourceImage condition="end with">powershell.exe</SourceImage>
+        <SourceImage condition="end with">cmd.exe</SourceImage>
+      </CreateRemoteThread>
+    </RuleGroup>
+
+    <!-- Event ID 10: 프로세스 접근 -->
+    <RuleGroup name="ProcessAccess" groupRelation="or">
+      <ProcessAccess onmatch="include">
+        <!-- LSASS 접근 모니터링 (자격 증명 덤핑) -->
+        <TargetImage condition="end with">lsass.exe</TargetImage>
+      </ProcessAccess>
+      <ProcessAccess onmatch="exclude">
+        <SourceImage condition="is">C:\Windows\System32\wbem\WmiPrvSE.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\System32\svchost.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\System32\lsass.exe</SourceImage>
+      </ProcessAccess>
+    </RuleGroup>
+
+    <!-- Event ID 11: 파일 생성 -->
+    <RuleGroup name="FileCreate" groupRelation="or">
+      <FileCreate onmatch="include">
+        <!-- 의심스러운 파일 확장자 -->
+        <TargetFilename condition="end with">.exe</TargetFilename>
+        <TargetFilename condition="end with">.dll</TargetFilename>
+        <TargetFilename condition="end with">.ps1</TargetFilename>
+        <TargetFilename condition="end with">.bat</TargetFilename>
+        <TargetFilename condition="end with">.cmd</TargetFilename>
+        <TargetFilename condition="end with">.vbs</TargetFilename>
+        <TargetFilename condition="end with">.js</TargetFilename>
+        <TargetFilename condition="end with">.hta</TargetFilename>
+        <!-- 의심스러운 위치 -->
+        <TargetFilename condition="begin with">C:\Users\Public\</TargetFilename>
+        <TargetFilename condition="contains">\AppData\Local\Temp\</TargetFilename>
+        <TargetFilename condition="contains">\Downloads\</TargetFilename>
+      </FileCreate>
+    </RuleGroup>
+
+    <!-- Event ID 12,13,14: 레지스트리 이벤트 -->
+    <RuleGroup name="RegistryEvent" groupRelation="or">
+      <RegistryEvent onmatch="include">
+        <!-- 지속성 관련 레지스트리 키 -->
+        <TargetObject condition="contains">CurrentVersion\Run</TargetObject>
+        <TargetObject condition="contains">CurrentVersion\RunOnce</TargetObject>
+        <TargetObject condition="contains">CurrentVersion\RunServices</TargetObject>
+        <TargetObject condition="contains">Policies\Explorer\Run</TargetObject>
+        <TargetObject condition="contains">Services\</TargetObject>
+        <TargetObject condition="contains">\Winlogon\</TargetObject>
+        <!-- COM Hijacking -->
+        <TargetObject condition="contains">\CLSID\</TargetObject>
+        <TargetObject condition="contains">\InprocServer32\</TargetObject>
+      </RegistryEvent>
+    </RuleGroup>
+
+    <!-- Event ID 15: 파일 스트림 생성 (ADS) -->
+    <RuleGroup name="FileCreateStreamHash" groupRelation="or">
+      <FileCreateStreamHash onmatch="include">
+        <!-- Alternate Data Streams 모니터링 -->
+        <TargetFilename condition="contains">:</TargetFilename>
+      </FileCreateStreamHash>
+    </RuleGroup>
+
+    <!-- Event ID 17,18: 파이프 이벤트 -->
+    <RuleGroup name="PipeEvent" groupRelation="or">
+      <PipeEvent onmatch="include">
+        <!-- 악성 Named Pipe 패턴 -->
+        <PipeName condition="begin with">\msagent_</PipeName>
+        <PipeName condition="begin with">\postex_</PipeName>
+        <PipeName condition="begin with">\status_</PipeName>
+        <PipeName condition="contains">meterpreter</PipeName>
+        <PipeName condition="contains">cobaltstrike</PipeName>
+      </PipeEvent>
+    </RuleGroup>
+
+    <!-- Event ID 22: DNS 쿼리 -->
+    <RuleGroup name="DnsQuery" groupRelation="or">
+      <DnsQuery onmatch="exclude">
+        <!-- 신뢰할 수 있는 도메인 제외 -->
+        <QueryName condition="end with">.microsoft.com</QueryName>
+        <QueryName condition="end with">.windows.com</QueryName>
+        <QueryName condition="end with">.windowsupdate.com</QueryName>
+      </DnsQuery>
+    </RuleGroup>
+
+    <!-- Event ID 23: 파일 삭제 (archived) -->
+    <RuleGroup name="FileDelete" groupRelation="or">
+      <FileDelete onmatch="include">
+        <TargetFilename condition="end with">.exe</TargetFilename>
+        <TargetFilename condition="end with">.dll</TargetFilename>
+      </FileDelete>
+    </RuleGroup>
+
+    <!-- Event ID 25: 프로세스 탬퍼링 -->
+    <RuleGroup name="ProcessTampering" groupRelation="or">
+      <ProcessTampering onmatch="include">
+        <Type condition="is">Image is replaced</Type>
+        <Type condition="is">Image is locked for access</Type>
+      </ProcessTampering>
+    </RuleGroup>
+  </EventFiltering>
+</Sysmon>
