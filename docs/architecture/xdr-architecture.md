@@ -26,8 +26,8 @@
 |                        데이터 계층 (Data Lake)                        |
 +----------------------------------------------------------------------+
 | +----------------+ +----------------+ +----------------+               |
-| | 로그 저장소     | | 인덱스 서버    | | 메타데이터 DB  |               |
-| | (Hot/Warm/Cold)| | (Elasticsearch)| | (PostgreSQL)  |               |
+| | 로그 저장소     | | 분석 엔진      | | 메타데이터 DB  |               |
+| | (Hot/Warm/Cold)| | (ClickHouse)   | | (PostgreSQL)  |               |
 | +----------------+ +----------------+ +----------------+               |
 +----------------------------------------------------------------------+
                                     ^
@@ -51,23 +51,31 @@
 #### 데이터 수집 계층
 | 컴포넌트 | 역할 | 기술 |
 |----------|------|------|
-| Log Collector | 로그 수집 및 전송 | Filebeat, Fluentd |
-| EDR Agent | 엔드포인트 텔레메트리 | Elastic Defend, CrowdStrike |
+| Log Collector | 로그 수집 및 전송 | Vector, Fluent Bit |
+| EDR Agent | 엔드포인트 텔레메트리 | Wazuh, Velociraptor |
 | Network Sensor | 네트워크 트래픽 캡처 | Zeek, Suricata |
 
 #### 데이터 처리 계층
 | 컴포넌트 | 역할 | 기술 |
 |----------|------|------|
-| Message Queue | 데이터 버퍼링 | Kafka, Redis |
-| Parser | 로그 파싱/정규화 | Logstash, Cribl |
+| Message Queue | 데이터 버퍼링 | Kafka, Redpanda |
+| Parser | 로그 파싱/정규화 | Vector, Cribl |
 | Enrichment | 컨텍스트 추가 | Custom Python |
+
+#### 저장소 계층
+| 컴포넌트 | 역할 | 기술 |
+|----------|------|------|
+| OLAP Database | 로그 저장/분석 | ClickHouse |
+| Time-Series | 메트릭 저장 | ClickHouse / VictoriaMetrics |
+| Object Storage | 장기 보관 | S3 / MinIO |
 
 #### 분석 계층
 | 컴포넌트 | 역할 | 기술 |
 |----------|------|------|
-| Correlation Engine | 상관분석 규칙 실행 | Splunk, Elastic |
-| ML Engine | 이상 탐지 | Elastic ML, Python |
+| Correlation Engine | 상관분석 규칙 실행 | ClickHouse SQL, Python |
+| ML Engine | 이상 탐지 | Python (scikit-learn, PyTorch) |
 | TI Platform | 위협 인텔리전스 | MISP, OpenCTI |
+| Visualization | 대시보드/알림 | Grafana |
 
 ## 2. 데이터 흐름
 

@@ -50,17 +50,18 @@ module_5/
 
 ## 추천 기술스택
 
-### Option A: Elastic 기반 (오픈소스 중심)
+### Option A: ClickHouse 기반 (오픈소스 중심)
 
 | 계층 | 솔루션 | 역할 |
 |------|--------|------|
-| SIEM | Elastic Security | 로그 수집, 상관분석, 탐지 |
+| SIEM | ClickHouse + Grafana | 로그 저장, 분석, 시각화 |
 | SOAR | Shuffle / n8n | 자동화 워크플로우, 대응 오케스트레이션 |
-| EDR | Elastic Defend (Endpoint) | 엔드포인트 탐지 및 대응 |
+| EDR | Wazuh / Velociraptor | 엔드포인트 탐지 및 대응 |
 | NDR | Zeek + Suricata | 네트워크 트래픽 분석, IDS |
-| 로그 파이프라인 | Logstash / Filebeat | 로그 수집 및 전처리 |
+| 로그 파이프라인 | Vector / Fluent Bit | 로그 수집 및 전처리 |
 | 위협 인텔리전스 | MISP + OpenCTI | IOC 관리, 위협 정보 공유 |
-| 데이터 저장소 | Elasticsearch + OpenSearch | 로그 저장 및 검색 |
+| 데이터 저장소 | ClickHouse (컬럼 기반 OLAP) | 고속 로그 저장 및 분석 |
+| 메시지 큐 | Kafka / Redpanda | 데이터 버퍼링 및 스트리밍 |
 
 ### Option B: Splunk 기반 (상용 중심)
 

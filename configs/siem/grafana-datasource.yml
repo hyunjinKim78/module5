@@ -1,0 +1,56 @@
+# Grafana Datasources for XDR Platform
+# ClickHouse를 통한 보안 로그 시각화
+
+apiVersion: 1
+
+datasources:
+  # ClickHouse - 메인 데이터소스
+  - name: ClickHouse-XDR
+    type: grafana-clickhouse-datasource
+    uid: clickhouse-xdr
+    access: proxy
+    url: http://clickhouse:8123
+    isDefault: true
+    jsonData:
+      defaultDatabase: xdr
+      dialTimeout: "10"
+      queryTimeout: "60"
+      protocol: http
+      port: 8123
+      tlsSkipVerify: false
+    secureJsonData:
+      username: xdr_reader
+      password: ${CLICKHOUSE_READER_PASSWORD}
+
+  # ClickHouse - 시스템 메트릭
+  - name: ClickHouse-System
+    type: grafana-clickhouse-datasource
+    uid: clickhouse-system
+    access: proxy
+    url: http://clickhouse:8123
+    jsonData:
+      defaultDatabase: system
+      dialTimeout: "10"
+      queryTimeout: "30"
+    secureJsonData:
+      username: xdr_reader
+      password: ${CLICKHOUSE_READER_PASSWORD}
+
+  # Prometheus - 인프라 메트릭
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    jsonData:
+      timeInterval: "15s"
+      queryTimeout: "60s"
+
+  # Alertmanager
+  - name: Alertmanager
+    type: alertmanager
+    uid: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    jsonData:
+      implementation: prometheus

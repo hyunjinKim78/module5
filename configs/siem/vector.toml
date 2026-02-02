@@ -1,0 +1,312 @@
+# XDR Platform Vector Configuration
+# 고성능 로그 수집 및 ClickHouse 전송
+
+# ============================================
+# 글로벌 설정
+# ============================================
+[api]
+enabled = true
+address = "0.0.0.0:8686"
+
+# ============================================
+# 데이터 소스 (Sources)
+# ============================================
+
+# Syslog 수신 (RFC 5424)
+[sources.syslog_input]
+type = "syslog"
+address = "0.0.0.0:514"
+mode = "tcp"
+
+# Zeek JSON 로그
+[sources.zeek_logs]
+type = "file"
+include = ["/var/log/zeek/current/*.log"]
+read_from = "beginning"
+fingerprint.strategy = "device_and_inode"
+
+# Suricata EVE JSON
+[sources.suricata_logs]
+type = "file"
+include = ["/var/log/suricata/eve.json"]
+read_from = "beginning"
+
+# Windows Event Log (via Fluent Bit forward)
+[sources.windows_events]
+type = "fluent"
+address = "0.0.0.0:24224"
+
+# EDR Agent (HTTP)
+[sources.edr_http]
+type = "http_server"
+address = "0.0.0.0:8080"
+encoding = "json"
+headers = ["X-Agent-ID", "X-Host-Name"]
+
+# Kafka 소비
+[sources.kafka_input]
+type = "kafka"
+bootstrap_servers = "kafka:9092"
+group_id = "vector-xdr"
+topics = ["edr-events", "ndr-events", "siem-logs"]
+auto_offset_reset = "latest"
+
+# ============================================
+# 변환 (Transforms)
+# ============================================
+
+# Zeek Conn 로그 파싱
+[transforms.parse_zeek_conn]
+type = "remap"
+inputs = ["zeek_logs"]
+source = '''
+if starts_with(string!(.file), "conn") {
+  . = parse_json!(.message)
+  .event_type = "zeek_conn"
+  .ts = to_timestamp!(.ts)
+  .src_ip = .id.orig_h
+  .src_port = .id.orig_p
+  .dst_ip = .id.resp_h
+  .dst_port = .id.resp_p
+}
+'''
+
+# Zeek DNS 로그 파싱
+[transforms.parse_zeek_dns]
+type = "remap"
+inputs = ["zeek_logs"]
+source = '''
+if starts_with(string!(.file), "dns") {
+  . = parse_json!(.message)
+  .event_type = "zeek_dns"
+  .ts = to_timestamp!(.ts)
+}
+'''
+
+# Zeek HTTP 로그 파싱
+[transforms.parse_zeek_http]
+type = "remap"
+inputs = ["zeek_logs"]
+source = '''
+if starts_with(string!(.file), "http") {
+  . = parse_json!(.message)
+  .event_type = "zeek_http"
+  .ts = to_timestamp!(.ts)
+}
+'''
+
+# Suricata 알림 파싱
+[transforms.parse_suricata]
+type = "remap"
+inputs = ["suricata_logs"]
+source = '''
+. = parse_json!(.message)
+if .event_type == "alert" {
+  .parsed_event_type = "suricata_alert"
+  .timestamp = to_timestamp!(.timestamp)
+  .src_ip = .src_ip
+  .dst_ip = .dest_ip
+  .src_port = .src_port
+  .dst_port = .dest_port
+  .alert_signature = .alert.signature
+  .alert_signature_id = .alert.signature_id
+  .alert_category = .alert.category
+  .alert_severity = .alert.severity
+}
+'''
+
+# Windows 이벤트 정규화
+[transforms.normalize_windows]
+type = "remap"
+inputs = ["windows_events"]
+source = '''
+.event_time = to_timestamp!(.timestamp) ?? now()
+.host_name = .hostname ?? .computer_name ?? "unknown"
+.event_type = "windows_event"
+
+# Sysmon 이벤트 처리
+if .source == "Microsoft-Windows-Sysmon/Operational" {
+  if .event_id == 1 {
+    .event_subtype = "process_create"
+    .process_name = .event_data.Image
+    .process_pid = to_int!(.event_data.ProcessId) ?? 0
+    .process_command_line = .event_data.CommandLine
+    .parent_name = .event_data.ParentImage
+    .parent_pid = to_int!(.event_data.ParentProcessId) ?? 0
+    .user_name = .event_data.User
+    .process_hash_sha256 = get(.event_data.Hashes) ?? ""
+  } else if .event_id == 3 {
+    .event_subtype = "network_connect"
+    .dst_ip = .event_data.DestinationIp
+    .dst_port = to_int!(.event_data.DestinationPort) ?? 0
+    .src_ip = .event_data.SourceIp
+    .src_port = to_int!(.event_data.SourcePort) ?? 0
+  }
+}
+'''
+
+# EDR 이벤트 정규화
+[transforms.normalize_edr]
+type = "remap"
+inputs = ["edr_http"]
+source = '''
+.event_time = to_timestamp!(.timestamp) ?? now()
+.host_name = get_env_var("X-Host-Name") ?? .hostname ?? "unknown"
+
+# 이벤트 타입별 처리
+if .event_type == "process" {
+  .table = "edr_process"
+} else if .event_type == "network" {
+  .table = "edr_network"
+} else if .event_type == "file" {
+  .table = "edr_file"
+}
+'''
+
+# 위협 인텔리전스 enrichment
+[transforms.threat_intel_enrich]
+type = "remap"
+inputs = ["normalize_edr", "normalize_windows"]
+source = '''
+# IOC 매칭을 위한 필드 추출
+.ioc_candidates = []
+
+if exists(.process_hash_sha256) {
+  .ioc_candidates = push(.ioc_candidates, {"type": "hash", "value": .process_hash_sha256})
+}
+if exists(.dst_ip) {
+  .ioc_candidates = push(.ioc_candidates, {"type": "ip", "value": .dst_ip})
+}
+if exists(.dns_query) {
+  .ioc_candidates = push(.ioc_candidates, {"type": "domain", "value": .dns_query})
+}
+'''
+
+# 라우팅 결정
+[transforms.route_events]
+type = "route"
+inputs = ["threat_intel_enrich", "parse_zeek_conn", "parse_zeek_dns", "parse_zeek_http", "parse_suricata"]
+route.edr_process = '.event_type == "process" || .event_subtype == "process_create"'
+route.edr_network = '.event_type == "network" || .event_subtype == "network_connect"'
+route.edr_file = '.event_type == "file"'
+route.ndr_conn = '.event_type == "zeek_conn"'
+route.ndr_dns = '.event_type == "zeek_dns"'
+route.ndr_http = '.event_type == "zeek_http"'
+route.ndr_alert = '.parsed_event_type == "suricata_alert"'
+
+# ============================================
+# 출력 (Sinks)
+# ============================================
+
+# ClickHouse - EDR Process
+[sinks.clickhouse_edr_process]
+type = "clickhouse"
+inputs = ["route_events.edr_process"]
+endpoint = "http://clickhouse:8123"
+database = "xdr"
+table = "edr_process"
+compression = "gzip"
+batch.max_bytes = 10485760
+batch.timeout_secs = 5
+auth.strategy = "basic"
+auth.user = "xdr_writer"
+auth.password = "${CLICKHOUSE_PASSWORD}"
+
+# ClickHouse - EDR Network
+[sinks.clickhouse_edr_network]
+type = "clickhouse"
+inputs = ["route_events.edr_network"]
+endpoint = "http://clickhouse:8123"
+database = "xdr"
+table = "edr_network"
+compression = "gzip"
+batch.max_bytes = 10485760
+batch.timeout_secs = 5
+auth.strategy = "basic"
+auth.user = "xdr_writer"
+auth.password = "${CLICKHOUSE_PASSWORD}"
+
+# ClickHouse - EDR File
+[sinks.clickhouse_edr_file]
+type = "clickhouse"
+inputs = ["route_events.edr_file"]
+endpoint = "http://clickhouse:8123"
+database = "xdr"
+table = "edr_file"
+compression = "gzip"
+batch.max_bytes = 10485760
+batch.timeout_secs = 5
+auth.strategy = "basic"
+auth.user = "xdr_writer"
+auth.password = "${CLICKHOUSE_PASSWORD}"
+
+# ClickHouse - NDR Conn
+[sinks.clickhouse_ndr_conn]
+type = "clickhouse"
+inputs = ["route_events.ndr_conn"]
+endpoint = "http://clickhouse:8123"
+database = "xdr"
+table = "ndr_conn"
+compression = "gzip"
+batch.max_bytes = 10485760
+batch.timeout_secs = 5
+auth.strategy = "basic"
+auth.user = "xdr_writer"
+auth.password = "${CLICKHOUSE_PASSWORD}"
+
+# ClickHouse - NDR DNS
+[sinks.clickhouse_ndr_dns]
+type = "clickhouse"
+inputs = ["route_events.ndr_dns"]
+endpoint = "http://clickhouse:8123"
+database = "xdr"
+table = "ndr_dns"
+compression = "gzip"
+batch.max_bytes = 10485760
+batch.timeout_secs = 5
+auth.strategy = "basic"
+auth.user = "xdr_writer"
+auth.password = "${CLICKHOUSE_PASSWORD}"
+
+# ClickHouse - NDR HTTP
+[sinks.clickhouse_ndr_http]
+type = "clickhouse"
+inputs = ["route_events.ndr_http"]
+endpoint = "http://clickhouse:8123"
+database = "xdr"
+table = "ndr_http"
+compression = "gzip"
+batch.max_bytes = 10485760
+batch.timeout_secs = 5
+auth.strategy = "basic"
+auth.user = "xdr_writer"
+auth.password = "${CLICKHOUSE_PASSWORD}"
+
+# ClickHouse - NDR Alert (Suricata)
+[sinks.clickhouse_ndr_alert]
+type = "clickhouse"
+inputs = ["route_events.ndr_alert"]
+endpoint = "http://clickhouse:8123"
+database = "xdr"
+table = "ndr_alert"
+compression = "gzip"
+batch.max_bytes = 10485760
+batch.timeout_secs = 5
+auth.strategy = "basic"
+auth.user = "xdr_writer"
+auth.password = "${CLICKHOUSE_PASSWORD}"
+
+# Kafka 출력 (다른 시스템 연동용)
+[sinks.kafka_enriched]
+type = "kafka"
+inputs = ["threat_intel_enrich"]
+bootstrap_servers = "kafka:9092"
+topic = "xdr-enriched-events"
+encoding.codec = "json"
+compression = "gzip"
+
+# 콘솔 디버그 (개발용)
+[sinks.console_debug]
+type = "console"
+inputs = ["route_events._unmatched"]
+encoding.codec = "json"
