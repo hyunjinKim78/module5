@@ -6,6 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 이 저장소는 XDR(Extended Detection and Response) 구축 계획을 위한 **보안 문서 저장소**입니다. 소스 코드가 아닌 한국어 기술 문서를 포함합니다.
 
+## skills
+  **Git commit**: 사용자가 git commit을 요청했을때 ./skills/git.commit/SKILL.md를 참고하여 git commit을 진행해줘
+
 ## 구성
 
 ```
