@@ -1,0 +1,101 @@
+title: PsExec Remote Execution
+id: CR-LAT-001
+status: stable
+description: PsExec를 사용한 원격 명령 실행 탐지
+
+author: Security Team
+date: 2024/01/01
+
+references:
+  - https://attack.mitre.org/techniques/T1570
+
+tags:
+  - attack.lateral_movement
+  - attack.t1570
+  - attack.t1021.002
+
+logsource:
+  category: process_creation
+  product: windows
+
+detection:
+  selection:
+    - Image|endswith: '\psexec.exe'
+    - Image|endswith: '\psexec64.exe'
+    - OriginalFileName:
+        - 'psexec.exe'
+        - 'psexec.c'
+  condition: selection
+
+falsepositives:
+  - Legitimate administrative activities
+  - IT management tools
+
+level: medium
+---
+title: WMI Remote Process Creation
+id: CR-LAT-002
+status: stable
+description: WMI를 통한 원격 프로세스 생성 탐지
+
+author: Security Team
+date: 2024/01/01
+
+references:
+  - https://attack.mitre.org/techniques/T1047
+
+tags:
+  - attack.lateral_movement
+  - attack.execution
+  - attack.t1047
+
+logsource:
+  category: process_creation
+  product: windows
+
+detection:
+  selection:
+    ParentImage|endswith: '\wmiprvse.exe'
+  filter:
+    Image|endswith:
+      - '\WmiPrvSE.exe'
+      - '\WmiApSrv.exe'
+  condition: selection and not filter
+
+falsepositives:
+  - Legitimate WMI operations
+  - System management tools
+
+level: medium
+---
+title: Pass-the-Hash Activity
+id: CR-LAT-003
+status: experimental
+description: Pass-the-Hash 공격 의심 활동 탐지
+
+author: Security Team
+date: 2024/01/01
+
+references:
+  - https://attack.mitre.org/techniques/T1550/002
+
+tags:
+  - attack.lateral_movement
+  - attack.t1550.002
+
+logsource:
+  product: windows
+  service: security
+
+detection:
+  selection:
+    EventID: 4624
+    LogonType: 9
+    LogonProcessName: 'seclogo'
+  condition: selection
+
+falsepositives:
+  - Legitimate RunAs operations
+  - Scheduled tasks
+
+level: high

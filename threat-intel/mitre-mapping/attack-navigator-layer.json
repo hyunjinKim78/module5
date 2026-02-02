@@ -1,0 +1,206 @@
+{
+  "name": "XDR Detection Coverage",
+  "versions": {
+    "attack": "14",
+    "navigator": "4.9.1",
+    "layer": "4.5"
+  },
+  "domain": "enterprise-attack",
+  "description": "XDR 플랫폼 탐지 커버리지 매핑",
+  "filters": {
+    "platforms": ["Windows", "Linux", "macOS"]
+  },
+  "sorting": 0,
+  "layout": {
+    "layout": "side",
+    "aggregateFunction": "average",
+    "showID": false,
+    "showName": true,
+    "showAggregateScores": false,
+    "countUnscored": false
+  },
+  "hideDisabled": false,
+  "techniques": [
+    {
+      "techniqueID": "T1566",
+      "tactic": "initial-access",
+      "color": "#31a354",
+      "comment": "피싱 탐지 - 이메일 게이트웨이 + EDR 연동",
+      "enabled": true,
+      "score": 80
+    },
+    {
+      "techniqueID": "T1566.001",
+      "tactic": "initial-access",
+      "color": "#31a354",
+      "comment": "첨부파일 기반 피싱 - 샌드박스 분석",
+      "enabled": true,
+      "score": 85
+    },
+    {
+      "techniqueID": "T1059",
+      "tactic": "execution",
+      "color": "#31a354",
+      "comment": "명령줄 인터프리터 - EDR 프로세스 모니터링",
+      "enabled": true,
+      "score": 90
+    },
+    {
+      "techniqueID": "T1059.001",
+      "tactic": "execution",
+      "color": "#31a354",
+      "comment": "PowerShell - 스크립트 블록 로깅 + EDR",
+      "enabled": true,
+      "score": 95
+    },
+    {
+      "techniqueID": "T1059.003",
+      "tactic": "execution",
+      "color": "#31a354",
+      "comment": "Windows Command Shell - EDR 프로세스 추적",
+      "enabled": true,
+      "score": 90
+    },
+    {
+      "techniqueID": "T1547",
+      "tactic": "persistence",
+      "color": "#74c476",
+      "comment": "부팅/로그온 자동 시작 - EDR 레지스트리 모니터링",
+      "enabled": true,
+      "score": 75
+    },
+    {
+      "techniqueID": "T1547.001",
+      "tactic": "persistence",
+      "color": "#74c476",
+      "comment": "레지스트리 Run 키 - EDR + SIEM 상관분석",
+      "enabled": true,
+      "score": 80
+    },
+    {
+      "techniqueID": "T1003",
+      "tactic": "credential-access",
+      "color": "#31a354",
+      "comment": "OS 자격 증명 덤핑 - LSASS 보호 + EDR",
+      "enabled": true,
+      "score": 85
+    },
+    {
+      "techniqueID": "T1003.001",
+      "tactic": "credential-access",
+      "color": "#31a354",
+      "comment": "LSASS 메모리 - Credential Guard + EDR",
+      "enabled": true,
+      "score": 90
+    },
+    {
+      "techniqueID": "T1021",
+      "tactic": "lateral-movement",
+      "color": "#74c476",
+      "comment": "원격 서비스 - NDR + 인증 로그 상관분석",
+      "enabled": true,
+      "score": 70
+    },
+    {
+      "techniqueID": "T1021.002",
+      "tactic": "lateral-movement",
+      "color": "#74c476",
+      "comment": "SMB/Windows Admin Shares - NDR 트래픽 분석",
+      "enabled": true,
+      "score": 75
+    },
+    {
+      "techniqueID": "T1047",
+      "tactic": "execution",
+      "color": "#74c476",
+      "comment": "WMI - EDR 프로세스 체인 분석",
+      "enabled": true,
+      "score": 70
+    },
+    {
+      "techniqueID": "T1071",
+      "tactic": "command-and-control",
+      "color": "#74c476",
+      "comment": "애플리케이션 레이어 프로토콜 - NDR + 프록시 로그",
+      "enabled": true,
+      "score": 65
+    },
+    {
+      "techniqueID": "T1071.001",
+      "tactic": "command-and-control",
+      "color": "#74c476",
+      "comment": "웹 프로토콜 - NDR HTTPS 검사 + 비콘 탐지",
+      "enabled": true,
+      "score": 70
+    },
+    {
+      "techniqueID": "T1048",
+      "tactic": "exfiltration",
+      "color": "#a1d99b",
+      "comment": "대안 프로토콜을 통한 유출 - NDR 이상 탐지",
+      "enabled": true,
+      "score": 60
+    },
+    {
+      "techniqueID": "T1048.003",
+      "tactic": "exfiltration",
+      "color": "#a1d99b",
+      "comment": "암호화되지 않은 프로토콜 - NDR DLP 연동",
+      "enabled": true,
+      "score": 65
+    },
+    {
+      "techniqueID": "T1027",
+      "tactic": "defense-evasion",
+      "color": "#a1d99b",
+      "comment": "난독화된 파일/정보 - EDR + 샌드박스",
+      "enabled": true,
+      "score": 55
+    },
+    {
+      "techniqueID": "T1562",
+      "tactic": "defense-evasion",
+      "color": "#74c476",
+      "comment": "방어 손상 - EDR 탬퍼 보호 + SIEM 알림",
+      "enabled": true,
+      "score": 75
+    },
+    {
+      "techniqueID": "T1562.001",
+      "tactic": "defense-evasion",
+      "color": "#74c476",
+      "comment": "도구 비활성화/수정 - EDR 자체 보호",
+      "enabled": true,
+      "score": 80
+    }
+  ],
+  "gradient": {
+    "colors": ["#ff6666", "#ffeb3b", "#31a354"],
+    "minValue": 0,
+    "maxValue": 100
+  },
+  "legendItems": [
+    {
+      "label": "높은 탐지 커버리지 (80-100)",
+      "color": "#31a354"
+    },
+    {
+      "label": "중간 탐지 커버리지 (50-79)",
+      "color": "#74c476"
+    },
+    {
+      "label": "낮은 탐지 커버리지 (0-49)",
+      "color": "#a1d99b"
+    },
+    {
+      "label": "탐지 없음",
+      "color": "#ff6666"
+    }
+  ],
+  "metadata": [],
+  "links": [],
+  "showTacticRowBackground": true,
+  "tacticRowBackground": "#dddddd",
+  "selectTechniquesAcrossTactics": true,
+  "selectSubtechniquesWithParent": false
+}
